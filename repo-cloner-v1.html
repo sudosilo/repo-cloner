@@ -607,7 +607,7 @@ function openSheet(full){
   var c = state.checks[full] || load("rc_checks", {})[full];
   var h = '<div class="name" style="font-weight:800;color:var(--blue);word-break:break-all">' + esc(full) + '</div>';
   h += '<div style="font-size:13px;margin:4px 0">' + esc(repo.description || "") + '</div>';
-  h += '<div class="mono">github.com/' + esc(full) + '</div>';
+  h += '<a class="btn ghost" style="display:block;text-align:center;text-decoration:none;margin:8px 0" href="https://github.com/' + esc(full) + '" target="_blank" rel="noopener">OPEN ON GITHUB</a>';
   if (!c) {
     h += '<h3>NOT CHECKED</h3><div>Tap Check on the card for the deep check.</div>';
   } else {
