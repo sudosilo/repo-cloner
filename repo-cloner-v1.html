@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>[ REPO CLONER ]</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 @import url('https://fonts.bunny.net/css?family=overpass:400,600,800|bangers:400');
 :root{
@@ -132,10 +133,33 @@ input[type=text],input[type=number],input[type=password],select{
 .flag.warn{border-color:var(--warn);}
 .flag.bad{border-color:var(--bad);}
 .mono{font-family:'Courier New',monospace;font-size:12px;white-space:pre-wrap;word-break:break-all;background:#f3f3f3;border:2px solid #111;padding:8px;max-height:260px;overflow:auto;}
+.gate{
+  position:fixed;inset:0;z-index:200;background:var(--paper);
+  background-image:radial-gradient(rgba(17,17,17,0.07) 1px, transparent 1.4px);background-size:14px 14px;
+  display:flex;align-items:flex-start;justify-content:center;padding:70px 14px 20px;overflow-y:auto;
+}
+.gate.hide{display:none;}
+.gate .panel{width:100%;max-width:420px;}
+.who{padding:12px 16px;font-size:12px;border-bottom:2px solid #111;background:var(--sky);word-break:break-all;}
 .log-line{font-size:12px;border-bottom:1px solid #ccc;padding:5px 0;}
 </style>
 </head>
 <body>
+<div class="gate" id="gate">
+  <div class="panel">
+    <h2>SIGN IN</h2>
+    <div style="font-size:13px;margin-bottom:10px">Repo Cloner uses your Mohave Tech account, the same one as Field Twin. Your Claude key is saved to your account and only you can read it.</div>
+    <label for="g-email">Email</label>
+    <input type="text" id="g-email" autocomplete="username" inputmode="email">
+    <label for="g-pass">Password</label>
+    <input type="password" id="g-pass" autocomplete="current-password">
+    <div class="btns">
+      <button class="btn blue" id="g-in">SIGN IN</button>
+      <button class="btn ghost" id="g-up">CREATE ACCOUNT</button>
+    </div>
+    <div class="status" id="g-status" style="margin:10px 0 0;height:60px">Sign in to use Repo Cloner.</div>
+  </div>
+</div>
 <header>
   <button class="burger" id="burger" aria-label="menu">&#9776;</button>
   <h1>REPO CLONER</h1>
@@ -143,10 +167,12 @@ input[type=text],input[type=number],input[type=password],select{
 
 <div class="scrim" id="scrim"></div>
 <nav class="menu" id="menu">
+  <div class="who" id="who">Not signed in</div>
   <button class="tab active" data-view="hunt">HUNT</button>
   <button class="tab" data-view="picks">PICKS</button>
   <button class="tab" data-view="log">LOG</button>
   <button class="tab" data-view="settings">SETTINGS</button>
+  <button class="tab" id="btn-signout">SIGN OUT</button>
   <details>
     <summary>LICENSE GUIDE</summary>
     <div class="inside">
@@ -291,6 +317,16 @@ input[type=text],input[type=number],input[type=password],select{
 
   <section class="view" id="view-settings">
     <div class="panel">
+      <h2>CLAUDE API KEY</h2>
+      <label for="s-claude">Your Anthropic API key</label>
+      <input type="password" id="s-claude" placeholder="sk-ant-xxxxxxxx" autocomplete="off">
+      <div class="btns">
+        <button class="btn blue" id="btn-save-claude">SAVE</button>
+        <button class="btn ghost" id="btn-clear-claude">CLEAR</button>
+      </div>
+      <div class="status" id="claude-status" style="margin:10px 0 0">The Claude button bills your own Anthropic account. The key is saved to your sign in and follows you to any device.</div>
+    </div>
+    <div class="panel">
       <h2>GITHUB TOKEN</h2>
       <label for="s-token">Personal access token, optional</label>
       <input type="password" id="s-token" placeholder="xxxxxxxx">
@@ -298,7 +334,7 @@ input[type=text],input[type=number],input[type=password],select{
         <button class="btn blue" id="btn-save-token">SAVE</button>
         <button class="btn ghost" id="btn-clear-token">CLEAR</button>
       </div>
-      <div class="status" id="token-status" style="margin:10px 0 0">Without a token GitHub allows a small number of checks per hour. With one, thousands. The token stays in this browser only.</div>
+      <div class="status" id="token-status" style="margin:10px 0 0">Without a token GitHub allows a small number of checks per hour. With one, thousands. The token is saved to your sign in.</div>
     </div>
     <div class="panel">
       <h2>BACKUP</h2>
@@ -335,13 +371,14 @@ var CCBY_TEXT = /(CC[- ]?BY(?![- ]?NC)|creative commons attribution(?! non))/i;
 var FREE_TEXT = /(CC0|public domain|cc[- ]?zero)/i;
 var GPL_TEXT = /(GNU GENERAL PUBLIC|GPL[- ]?v?[23]|AGPL)/i;
 
+var acct = { user: null, claudeKey: "", githubToken: "" };
 var state = { results: [], checks: {}, page: 1, lastQuery: "", current: null, busy: false };
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]; }); }
 function load(k, d){ try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } }
 function store(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} }
-function token(){ try { return localStorage.getItem("rc_token") || ""; } catch(e){ return ""; } }
+function token(){ return acct.githubToken || ""; }
 function say(msg){ $("status").textContent = msg; }
 
 /* ---------- menu ---------- */
@@ -351,7 +388,7 @@ function menu(open){
 }
 $("burger").onclick = function(){ menu(!$("menu").classList.contains("open")); };
 $("scrim").onclick = function(){ menu(false); };
-Array.prototype.forEach.call(document.querySelectorAll(".menu .tab"), function(b){
+Array.prototype.forEach.call(document.querySelectorAll(".menu .tab[data-view]"), function(b){
   b.onclick = function(){
     document.querySelectorAll(".menu .tab").forEach(function(x){ x.classList.remove("active"); });
     b.classList.add("active");
@@ -555,10 +592,20 @@ async function askClaude(full){
     "File tree:\n" + c.tree.join("\n"),
     "README:\n" + c.readme
   ].join("\n");
-  var r = await fetch("/api/repo-cloner-v1-score", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: text }) });
-  var data = await r.json().catch(function(){ return { error: "bad reply" }; });
-  if (!r.ok || data.error) throw new Error("Claude check failed: " + (data.error || r.status));
-  c.claude = data;
+  if (!acct.claudeKey) throw new Error("Add your Claude API key in Settings first.");
+  var r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": acct.claudeKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+    body: JSON.stringify({ model: "claude-sonnet-5-5", max_tokens: 900, system: CLAUDE_SYSTEM, messages: [{ role: "user", content: text.slice(0, 60000) }] })
+  });
+  var data = await r.json().catch(function(){ return null; });
+  if (!r.ok || !data) {
+    var why = data && data.error && data.error.message ? data.error.message : ("status " + r.status);
+    if (r.status === 401) why = "Anthropic rejected that key. Check it in Settings.";
+    throw new Error("Claude check failed: " + why);
+  }
+  var rawText = (data.content || []).filter(function(b){ return b.type === "text"; }).map(function(b){ return b.text; }).join("");
+  c.claude = cleanVerdict(rawText);
   state.checks[full] = c;
   var saved = load("rc_checks", {}); saved[full] = c; store("rc_checks", saved);
   var picks = load("rc_picks", []);
@@ -566,6 +613,26 @@ async function askClaude(full){
   store("rc_picks", picks);
   updateCard(full);
   return c;
+}
+
+var CLAUDE_SYSTEM = [
+  "You judge open source games on GitHub for a solo developer who wants to fork one, put his own skin on it, add his own twist, and ship it as his own game, sometimes for sale.",
+  "You get the repo license, stats, flags from an automatic license scan, the file tree, and the README.",
+  "Score from 0 to 100 how good a reskin base it is: clean license for selling, art and sound easy to swap, small readable code, runs in a browser, fun core loop worth keeping.",
+  "Drop the score hard for any asset or code that is noncommercial, all rights reserved, GPL, or of unclear origin, and say so in risk.",
+  "Only judge from what you were given. Never invent files or facts.",
+  'Reply with JSON only, no other text, in this shape: {"score":0,"verdict":"one or two sentences","swap":"what art, sound, text and names to replace","keep":"what code and mechanics are worth keeping","twist":"one idea to make it his own","risk":"license or asset risks, or none seen"}',
+  "Plain words. No markdown, no lists, no em dashes, no en dashes."
+].join("\n");
+
+function cleanVerdict(raw){
+  var a = raw.indexOf("{"), b = raw.lastIndexOf("}"), parsed = null;
+  if (a >= 0 && b > a) { try { parsed = JSON.parse(raw.slice(a, b + 1)); } catch(e){ parsed = null; } }
+  if (!parsed) return { score: null, text: raw.slice(0, 1200) };
+  var out = {}, n = parseInt(parsed.score, 10);
+  out.score = isFinite(n) ? Math.max(0, Math.min(100, n)) : null;
+  ["verdict","swap","keep","twist","risk"].forEach(function(k){ if (typeof parsed[k] === "string") out[k] = parsed[k].slice(0, 600); });
+  return out;
 }
 
 /* ---------- render ---------- */
@@ -743,17 +810,31 @@ $("btn-exp-log").onclick = function(){ download("repo-cloner-v1-log-" + stamp() 
 $("btn-clear-log").onclick = function(){ if (confirmTwice(this)) { store("rc_log", []); renderLog(); } };
 
 /* ---------- settings ---------- */
+async function saveAccount(fields, statusId, msg){
+  try {
+    var res = await sb.auth.updateUser({ data: fields });
+    if (res.error) throw res.error;
+    readAccount(res.data.user);
+    $(statusId).textContent = msg;
+  } catch(e) { $(statusId).textContent = "Could not save: " + (e.message || e); }
+}
 $("btn-save-token").onclick = function(){
   var t = $("s-token").value.trim();
-  try { localStorage.setItem("rc_token", t); } catch(e){}
-  $("token-status").textContent = t ? "Token saved in this browser." : "Token field was empty.";
+  saveAccount({ repo_cloner_github_token: t }, "token-status", t ? "Token saved to your sign in." : "Token field was empty.");
 };
 $("btn-clear-token").onclick = function(){
-  try { localStorage.removeItem("rc_token"); } catch(e){}
   $("s-token").value = "";
-  $("token-status").textContent = "Token cleared.";
+  saveAccount({ repo_cloner_github_token: "" }, "token-status", "Token cleared.");
 };
-if (token()) $("s-token").value = token();
+$("btn-save-claude").onclick = function(){
+  var k = $("s-claude").value.trim();
+  if (k && !/^sk-ant-/.test(k)) { $("claude-status").textContent = "That does not look like an Anthropic key. They start with sk-ant-."; return; }
+  saveAccount({ repo_cloner_claude_key: k }, "claude-status", k ? "Claude key saved to your sign in." : "Key field was empty.");
+};
+$("btn-clear-claude").onclick = function(){
+  $("s-claude").value = "";
+  saveAccount({ repo_cloner_claude_key: "" }, "claude-status", "Claude key cleared.");
+};
 $("btn-backup").onclick = function(){
   download("repo-cloner-v1-backup-" + stamp() + ".json", JSON.stringify({ picks: load("rc_picks", []), checks: load("rc_checks", {}), log: load("rc_log", []) }), "application/json");
 };
@@ -768,6 +849,55 @@ $("restore-file").onchange = function(){
     $("token-status").textContent = "Backup imported.";
   }).catch(function(){ $("token-status").textContent = "That file is not a Repo Cloner backup."; });
 };
+
+/* ---------- sign in ---------- */
+var HUB_URL = "https://zasyjjoypkpvyqdueums.supabase.co";
+var HUB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inphc3lqam95cGtwdnlxZHVldW1zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyMjk1NjQsImV4cCI6MjEwNjgwNTU2NH0.PZrUvG4qsTpMQeihXbbzaFYUAAJ9YV7FtxLTkcQGFVI";
+var sb = window.supabase.createClient(HUB_URL, HUB_KEY, { auth: { persistSession: true, autoRefreshToken: true, storageKey: "repo-cloner-v1-auth" } });
+
+function readAccount(user){
+  acct.user = user || null;
+  var m = (user && user.user_metadata) || {};
+  acct.claudeKey = m.repo_cloner_claude_key || "";
+  acct.githubToken = m.repo_cloner_github_token || "";
+  $("s-claude").value = acct.claudeKey;
+  $("s-token").value = acct.githubToken;
+  $("who").textContent = user ? "Signed in as " + user.email : "Not signed in";
+  $("gate").classList.toggle("hide", !!user);
+}
+function gateSay(m){ $("g-status").textContent = m; }
+
+$("g-in").onclick = async function(){
+  gateSay("Signing in...");
+  var r = await sb.auth.signInWithPassword({ email: $("g-email").value.trim(), password: $("g-pass").value });
+  if (r.error) { gateSay(r.error.message); return; }
+  var u = await sb.auth.getUser();
+  readAccount(u.data.user);
+  $("g-pass").value = "";
+};
+$("g-up").onclick = async function(){
+  var email = $("g-email").value.trim(), pass = $("g-pass").value;
+  if (pass.length < 8) { gateSay("Pick a password of at least eight characters."); return; }
+  gateSay("Creating account...");
+  var r = await sb.auth.signUp({ email: email, password: pass, options: { emailRedirectTo: location.origin } });
+  if (r.error) { gateSay(r.error.message); return; }
+  if (r.data.session) { readAccount(r.data.user); $("g-pass").value = ""; }
+  else gateSay("Check your email for the confirmation link, then come back and sign in.");
+};
+$("btn-signout").onclick = async function(){
+  menu(false);
+  await sb.auth.signOut();
+  readAccount(null);
+  gateSay("Signed out.");
+};
+sb.auth.onAuthStateChange(function(ev){ if (ev === "SIGNED_OUT") readAccount(null); });
+(async function(){
+  var s0 = await sb.auth.getSession();
+  if (s0.data.session) {
+    var u = await sb.auth.getUser();
+    readAccount(u.data.user || null);
+  } else readAccount(null);
+})();
 </script>
 </body>
 </html>
